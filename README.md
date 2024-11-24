@@ -5,7 +5,7 @@ A tool to check the availability of one or multiple network endpoints.
 ## Installation
 
 ```bash
-wget https://raw.githubusercontent.com/jackcvr/await/refs/heads/main/await
+wget -O await https://raw.githubusercontent.com/jackcvr/await/refs/heads/main/await && chmod +x ./await
 ```
 
 ## Usage
