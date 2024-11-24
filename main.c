@@ -186,16 +186,9 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (argc > epc + 1) {
-        const int cmd_index = epc + 2;
-        const int size = argc - cmd_index;
-        const char *cmd = argv[cmd_index];
-        char *cmd_argv[size + 1];
-        for (int i = 0; i < size; ++i) {
-            cmd_argv[i] = argv[cmd_index + i];
-        }
-        cmd_argv[size] = NULL;
-        if (execvp(cmd, cmd_argv) < 0) {
+    const int cmd_index = epc + 2;
+    if (argc > cmd_index) {
+        if (execvp(argv[cmd_index], &argv[cmd_index]) < 0) {
             perror("exec error");
             return EXIT_FAILURE;
         }
