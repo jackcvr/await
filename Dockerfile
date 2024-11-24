@@ -1,3 +1,9 @@
-FROM alpine:latest
+FROM debian:12-slim
 
-RUN apk add --no-cache gcc musl-dev
+RUN apt-get update \
+    && apt-get install -y wget
+
+RUN wget https://musl.cc/x86_64-linux-musl-native.tgz \
+    && tar xvfz x86_64-linux-musl-native.tgz
+
+ENV PATH=$PATH:/x86_64-linux-musl-native/bin

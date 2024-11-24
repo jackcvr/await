@@ -4,4 +4,4 @@ services:
     working_dir: /app
     volumes:
       - .:/app
-    command: [x86_64-alpine-linux-musl-gcc, -O2, -static, -w, -s, -o, await, main.c]
+    command: [x86_64-linux-musl-gcc, -Wall, -O2, -static, -w, -s, -o, await, main.c]
