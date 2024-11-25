@@ -11,7 +11,19 @@
 #include <string.h>
 #include <stdarg.h>
 
-const unsigned int USEC_INTERVAL = 50 * 1000;  // 50ms
+#ifndef CONNECTION_TIME_USEC
+#define CONNECTION_TIME_USEC 25000 // 25ms
+#endif
+
+#ifndef INTERVAL_USEC
+#define INTERVAL_USEC 1000000 // 1s
+#endif
+
+#if INTERVAL_USEC < CONNECTION_TIME_USEC
+#error INTERVAL_USEC cannot be less than CONNECTION_TIME_USEC
+#endif
+
+const unsigned int INTERVAL_USEC_ = INTERVAL_USEC - CONNECTION_TIME_USEC;
 
 typedef struct {
     char host[255];
@@ -41,11 +53,17 @@ void perrorf(const char *format, ...) {
 }
 
 int endpoint_parse_address(endpoint_t *ep, char *addr) {
-    int res = sscanf(addr, "%[^:]:%d/%d", &ep->host, &ep->port, &ep->timeout);
+    int res = sscanf(addr, "%[^:]:%d/%d", (char *)&ep->host, &ep->port, &ep->timeout);
     if (res == 2 || res == 3) {
         return 0;
     }
     return -1;
+}
+
+void endpoint_close(endpoint_t *ep) {
+    close(ep->fd);
+    ep->is_connected = true;
+    printf("%s:%d is available\n", ep->host, ep->port);
 }
 
 int sockaddr_in_getaddrinfo(struct sockaddr_in *sa, const char *host, const unsigned int port) {
@@ -105,17 +123,17 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < ep_count; ++i) {
         endpoint_t *ep = &endpoints[i];
         if (endpoint_parse_address(ep, argv[i + 1]) < 0) {
-            perrorf("%s - bad address", argv[i + 1]);
+            perrorf("[%s] bad address", argv[i + 1]);
             RETURN(EXIT_FAILURE);
         }
 
         if (sockaddr_in_getaddrinfo(&ep->sa, ep->host, ep->port) < 0) {
-            perrorf("%s:%d - msg", ep->host, ep->port);
+            perrorf("[%s:%d] getaddrinfo error", ep->host, ep->port);
             RETURN(EXIT_FAILURE);
         }
 
         if (fd_set_socket(&ep->fd) < 0) {
-            perrorf("%s:%d - msg", ep->host, ep->port);
+            perrorf("[%s:%d] socket error", ep->host, ep->port);
             RETURN(EXIT_FAILURE);
         }
 
@@ -130,15 +148,16 @@ int main(int argc, char *argv[]) {
     struct sockaddr _addr_;
     socklen_t _addr_len_;
     int done = 0;
+#define CHECK_BREAK if (done >= ep_count) break
 
-    while (done < ep_count) {
+    while (true) {
         // try to connect each not connected and not time-outed endpoint
         for (int i = 0; i < ep_count; ++i) {
             endpoint_t *ep = &endpoints[i];
             if (ep->is_connected || ep->is_failed) {
                 continue;
             }
-            if (connect(ep->fd, (struct sockaddr *)&ep->sa, sizeof(ep->sa))) {
+            if (connect(ep->fd, (struct sockaddr *)&ep->sa, sizeof(ep->sa)) < 0) {
                 if (errno == EINPROGRESS) {
                     ep->in_progress = true;
                 } else {
@@ -147,24 +166,22 @@ int main(int argc, char *argv[]) {
                     }
                     ep->in_progress = false;
                 }
-            }
-            if (ep->deadline.tv_sec > 0) {
-                timespec_monotime(&ts);
-                if (ts.tv_sec >= ep->deadline.tv_sec && ts.tv_nsec >= ep->deadline.tv_nsec) {
-                    ep->is_failed = true;
-                    ++done;
-                    printf("%s:%d is unavailable\n", ep->host, ep->port);
-                    RETURN(EXIT_FAILURE);
+                if (ep->deadline.tv_sec > 0) {
+                    timespec_monotime(&ts);
+                    if (ts.tv_sec >= ep->deadline.tv_sec && ts.tv_nsec >= ep->deadline.tv_nsec) {
+                        ep->is_failed = true;
+                        ++done;
+                        printf("%s:%d is unavailable\n", ep->host, ep->port);
+                        RETURN(EXIT_FAILURE);
+                    }
                 }
+            } else {
+                endpoint_close(ep);
+                ++done;
             }
         }
-
-        // break if not connected endpoints are time-outed
-        if (done == ep_count) {
-            break;
-        }
-
-        usleep(USEC_INTERVAL); // give some time to establish connections
+        CHECK_BREAK;
+        usleep(CONNECTION_TIME_USEC); // give some time to establish connections
 
         // check availability by executing getpeername on each socket which is in progress
         for (int i = 0; i < ep_count; ++i) {
@@ -177,23 +194,27 @@ int main(int argc, char *argv[]) {
             if (getpeername(ep->fd, &_addr_, &_addr_len_) < 0) {
                 continue;
             }
-            // getpeername succeeded - close fd and mark endpoint as connected
-            close(ep->fd);
-            ep->is_connected = true;
+            // getpeername succeeded
+            endpoint_close(ep);
             ++done;
-            printf("%s:%d is available\n", ep->host, ep->port);
         }
+        CHECK_BREAK;
+        usleep(INTERVAL_USEC_);
     }
 
-    const int cmd_index = ep_count + 2;
-    if (argc > cmd_index) {
-        if (execvp(argv[cmd_index], &argv[cmd_index]) < 0) {
-            perror("exec error");
-            RETURN(EXIT_FAILURE);
-        }
-    }
+    exit:
+        free(endpoints);
+        fflush(stdout);
 
-exit:
-    free(endpoints);
-    return exit_code;
+        if (exit_code == EXIT_SUCCESS) {
+            const int cmd_index = ep_count + 2;
+            if (argc > cmd_index) {
+                if (execvp(argv[cmd_index], &argv[cmd_index]) < 0) {
+                    perror("exec error");
+                    exit_code = EXIT_FAILURE;
+                }
+            }
+        }
+
+        return exit_code;
 }

@@ -2,6 +2,11 @@
 
 A tool to check the availability of one or multiple network endpoints.
 
+## Features
+
+- small statically linked binary
+- minimal memory usage
+
 ## Installation
 
 ```bash

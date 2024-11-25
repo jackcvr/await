@@ -4,4 +4,26 @@ services:
     working_dir: /app
     volumes:
       - .:/app
-    command: [x86_64-linux-musl-gcc, -Wall, -O2, -static, -w, -s, -o, await, main.c]
+    command: [x86_64-linux-musl-gcc, -Wall, -O2, -static, -s, -o, await, main.c]
+
+  await:
+    build: .
+    working_dir: /app
+    volumes:
+      - .:/app
+    depends_on:
+      - builder
+    command: [./await, server1:80/10, server2:80/10, --, ls, -la]
+
+  server1:
+    image: alpine/socat:latest
+    init: true
+    entrypoint: []
+    command: [sh, -c, "sleep 5 && socat -dd tcp-listen:80 -"]
+
+  server2:
+    image: alpine/socat:latest
+    init: true
+    entrypoint: [ ]
+    command: [sh, -c, "sleep 7 && socat -dd tcp-listen:80 -"]
+
