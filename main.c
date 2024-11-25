@@ -82,7 +82,11 @@ void monotime(struct timespec *ts) {
     }
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char *argv[]) {
+    int exit_code = EXIT_SUCCESS;
+    Conn *connections = NULL;
+#define RETURN(code) exit_code = code; goto exit
+
     // count out endpoints
     int epc = 0;
     for (epc = 0; epc < argc - 1; ++epc) {
@@ -90,15 +94,14 @@ int main(int argc, char **argv) {
             break;
         }
     }
-
     if (epc == 0) {
         fprintf(stderr,
             "Usage: %s <host>:<port>[/<timeout>] [<host>:<port>[/<timeout>] ...] [-- <command>]\n",
             argv[0]);
-        return EXIT_FAILURE;
+        RETURN(EXIT_FAILURE);
     }
 
-    Conn connections[epc];
+    connections = calloc(epc, sizeof(Conn));
     struct timespec ts;
 
     // setup connections
@@ -106,21 +109,20 @@ int main(int argc, char **argv) {
         Endpoint ep = {0};
         if (!parse_addr(&ep, argv[i + 1])) {
             perrorf("%s - bad address", argv[i + 1]);
-            return EXIT_FAILURE;
+            RETURN(EXIT_FAILURE);
         }
 
         Conn *c = &connections[i];
-        memset(c, 0, sizeof(Conn));
         c->ep = ep;
 
         if (!get_sockaddr(&c->sa, c->ep.host, c->ep.port)) {
             perrorf("%s:%d - msg", c->ep.host, c->ep.port);
-            return EXIT_FAILURE;
+            RETURN(EXIT_FAILURE);
         }
 
         if (!tcp_socket(&c->fd)) {
             perrorf("%s:%d - msg", c->ep.host, c->ep.port);
-            return EXIT_FAILURE;
+            RETURN(EXIT_FAILURE);
         }
 
         // setup deadlines for connections
@@ -147,7 +149,7 @@ int main(int argc, char **argv) {
                     c->in_progress = true;
                 } else {
                     if (errno == EAFNOSUPPORT) {
-                        return EXIT_FAILURE;
+                        RETURN(EXIT_FAILURE);
                     }
                     c->in_progress = false;
                 }
@@ -158,15 +160,18 @@ int main(int argc, char **argv) {
                     c->is_time_outed = true;
                     ++done;
                     printf("%s:%d is unavailable\n", c->ep.host, c->ep.port);
-                    return EXIT_FAILURE;
+                    RETURN(EXIT_FAILURE);
                 }
             }
         }
+
         // break if not connected endpoints are time-outed
         if (done == epc) {
             break;
         }
-        usleep(USEC_INTERVAL); // give some time to establish connection
+
+        usleep(USEC_INTERVAL); // give some time to establish connections
+
         // check availability by executing getpeername on each socket which is in progress
         for (int i = 0; i < epc; ++i) {
             Conn *c = &connections[i];
@@ -190,9 +195,11 @@ int main(int argc, char **argv) {
     if (argc > cmd_index) {
         if (execvp(argv[cmd_index], &argv[cmd_index]) < 0) {
             perror("exec error");
-            return EXIT_FAILURE;
+            RETURN(EXIT_FAILURE);
         }
     }
 
-    return EXIT_SUCCESS;
+    exit:
+        free(connections);
+    return exit_code;
 }
