@@ -17,65 +17,62 @@ typedef struct {
     char host[255];
     unsigned int port;
     unsigned int timeout;
-} Endpoint;
-
-typedef struct {
-    Endpoint ep;
     int fd;
     struct sockaddr_in sa;
     struct timespec deadline;
     bool in_progress;
     bool is_connected;
-    bool is_time_outed;
-} Conn;
+    bool is_failed;
+} endpoint_t;
 
 void perrorf(const char *format, ...) {
     va_list args;
     va_start(args, format);
-    if (vfprintf(stderr, format, args) < 0) {
-        perror("perrorf error");
-        exit(EXIT_FAILURE);
-    }
-    if (fprintf(stderr, ": %s\n", strerror(errno)) < 0) {
-        perror("perrorf error");
-        exit(EXIT_FAILURE);
+    int status = 0;
+    status = vfprintf(stderr, format, args);
+    if (status >= 0) {
+        status = fprintf(stderr, ": %s\n", strerror(errno));
     }
     va_end(args);
+    if (status < 0) {
+        perror("perrorf error");
+        exit(EXIT_FAILURE);
+    }
 }
 
-bool parse_addr(Endpoint *ep, char *addr) {
-    int res = sscanf(addr, "%[^:]:%d/%d", ep->host, &ep->port, &ep->timeout);
+int endpoint_parse_address(endpoint_t *ep, char *addr) {
+    int res = sscanf(addr, "%[^:]:%d/%d", &ep->host, &ep->port, &ep->timeout);
     if (res == 2 || res == 3) {
-        return true;
+        return 0;
     }
-    return false;
+    return -1;
 }
 
-bool tcp_socket(int *fd_p) {
-    *fd_p = socket(AF_INET, SOCK_STREAM, 0);
-    if (*fd_p < 0) {
-        return false;
-    }
-    if (fcntl(*fd_p, F_SETFL, O_NONBLOCK) < 0) {
-        return false;
-    }
-    return true;
-}
-
-bool get_sockaddr(struct sockaddr_in *sa, const char *host, const unsigned int port) {
+int sockaddr_in_getaddrinfo(struct sockaddr_in *sa, const char *host, const unsigned int port) {
     struct addrinfo hints = {0}, *ai;
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     if (getaddrinfo(host, NULL, &hints, &ai) < 0) {
-        return false;
+        return -1;
     }
     *sa = *(struct sockaddr_in *)ai->ai_addr;
     sa->sin_port = htons(port);
     freeaddrinfo(ai);
-    return true;
+    return 0;
 }
 
-void monotime(struct timespec *ts) {
+int fd_set_socket(int *fd_p) {
+    *fd_p = socket(AF_INET, SOCK_STREAM, 0);
+    if (*fd_p < 0) {
+        return -1;
+    }
+    if (fcntl(*fd_p, F_SETFL, O_NONBLOCK) < 0) {
+        return -1;
+    }
+    return 0;
+}
+
+void timespec_monotime(struct timespec *ts) {
     if (clock_gettime(CLOCK_MONOTONIC, ts) < 0) {
         perror("clock_gettime() error");
         exit(EXIT_FAILURE);
@@ -84,52 +81,49 @@ void monotime(struct timespec *ts) {
 
 int main(int argc, char *argv[]) {
     int exit_code = EXIT_SUCCESS;
-    Conn *connections = NULL;
+    endpoint_t *endpoints = NULL;
 #define RETURN(code) exit_code = code; goto exit
 
     // count out endpoints
-    int epc = 0;
-    for (epc = 0; epc < argc - 1; ++epc) {
-        if (strcmp(argv[epc + 1], "--") == 0) {
+    int ep_count = 0;
+    for (ep_count = 0; ep_count < argc - 1; ++ep_count) {
+        if (strcmp(argv[ep_count + 1], "--") == 0) {
             break;
         }
     }
-    if (epc == 0) {
+    if (ep_count == 0) {
         fprintf(stderr,
             "Usage: %s <host>:<port>[/<timeout>] [<host>:<port>[/<timeout>] ...] [-- <command>]\n",
             argv[0]);
         RETURN(EXIT_FAILURE);
     }
 
-    connections = calloc(epc, sizeof(Conn));
+    endpoints = calloc(ep_count, sizeof(endpoint_t));
     struct timespec ts;
 
-    // setup connections
-    for (int i = 0; i < epc; ++i) {
-        Endpoint ep = {0};
-        if (!parse_addr(&ep, argv[i + 1])) {
+    // setup endpoints
+    for (int i = 0; i < ep_count; ++i) {
+        endpoint_t *ep = &endpoints[i];
+        if (endpoint_parse_address(ep, argv[i + 1]) < 0) {
             perrorf("%s - bad address", argv[i + 1]);
             RETURN(EXIT_FAILURE);
         }
 
-        Conn *c = &connections[i];
-        c->ep = ep;
-
-        if (!get_sockaddr(&c->sa, c->ep.host, c->ep.port)) {
-            perrorf("%s:%d - msg", c->ep.host, c->ep.port);
+        if (sockaddr_in_getaddrinfo(&ep->sa, ep->host, ep->port) < 0) {
+            perrorf("%s:%d - msg", ep->host, ep->port);
             RETURN(EXIT_FAILURE);
         }
 
-        if (!tcp_socket(&c->fd)) {
-            perrorf("%s:%d - msg", c->ep.host, c->ep.port);
+        if (fd_set_socket(&ep->fd) < 0) {
+            perrorf("%s:%d - msg", ep->host, ep->port);
             RETURN(EXIT_FAILURE);
         }
 
-        // setup deadlines for connections
-        if (c->ep.timeout > 0) {
-            monotime(&ts);
-            c->deadline.tv_sec = ts.tv_sec + c->ep.timeout;
-            c->deadline.tv_nsec = ts.tv_nsec;
+        // setup deadlines for endpoints
+        if (ep->timeout > 0) {
+            timespec_monotime(&ts);
+            ep->deadline.tv_sec = ts.tv_sec + ep->timeout;
+            ep->deadline.tv_nsec = ts.tv_nsec;
         }
     }
 
@@ -137,61 +131,61 @@ int main(int argc, char *argv[]) {
     socklen_t _addr_len_;
     int done = 0;
 
-    while (done < epc) {
+    while (done < ep_count) {
         // try to connect each not connected and not time-outed endpoint
-        for (int i = 0; i < epc; ++i) {
-            Conn *c = &connections[i];
-            if (c->is_connected || c->is_time_outed) {
+        for (int i = 0; i < ep_count; ++i) {
+            endpoint_t *ep = &endpoints[i];
+            if (ep->is_connected || ep->is_failed) {
                 continue;
             }
-            if (connect(c->fd, (struct sockaddr *)&c->sa, sizeof(c->sa))) {
+            if (connect(ep->fd, (struct sockaddr *)&ep->sa, sizeof(ep->sa))) {
                 if (errno == EINPROGRESS) {
-                    c->in_progress = true;
+                    ep->in_progress = true;
                 } else {
                     if (errno == EAFNOSUPPORT) {
                         RETURN(EXIT_FAILURE);
                     }
-                    c->in_progress = false;
+                    ep->in_progress = false;
                 }
             }
-            if (c->deadline.tv_sec > 0) {
-                monotime(&ts);
-                if (ts.tv_sec >= c->deadline.tv_sec && ts.tv_nsec >= c->deadline.tv_nsec) {
-                    c->is_time_outed = true;
+            if (ep->deadline.tv_sec > 0) {
+                timespec_monotime(&ts);
+                if (ts.tv_sec >= ep->deadline.tv_sec && ts.tv_nsec >= ep->deadline.tv_nsec) {
+                    ep->is_failed = true;
                     ++done;
-                    printf("%s:%d is unavailable\n", c->ep.host, c->ep.port);
+                    printf("%s:%d is unavailable\n", ep->host, ep->port);
                     RETURN(EXIT_FAILURE);
                 }
             }
         }
 
         // break if not connected endpoints are time-outed
-        if (done == epc) {
+        if (done == ep_count) {
             break;
         }
 
         usleep(USEC_INTERVAL); // give some time to establish connections
 
         // check availability by executing getpeername on each socket which is in progress
-        for (int i = 0; i < epc; ++i) {
-            Conn *c = &connections[i];
-            if (c->is_connected || c->is_time_outed || !c->in_progress) {
+        for (int i = 0; i < ep_count; ++i) {
+            endpoint_t *ep = &endpoints[i];
+            if (ep->is_connected || ep->is_failed || !ep->in_progress) {
                 continue;
             }
             memset(&_addr_, 0, sizeof(_addr_));
             memset(&_addr_len_, 0, sizeof(_addr_len_));
-            if (getpeername(c->fd, &_addr_, &_addr_len_) < 0) {
+            if (getpeername(ep->fd, &_addr_, &_addr_len_) < 0) {
                 continue;
             }
-            // getpeername succeeded - close fd and mark as connected
-            close(c->fd);
-            c->is_connected = true;
+            // getpeername succeeded - close fd and mark endpoint as connected
+            close(ep->fd);
+            ep->is_connected = true;
             ++done;
-            printf("%s:%d is available\n", c->ep.host, c->ep.port);
+            printf("%s:%d is available\n", ep->host, ep->port);
         }
     }
 
-    const int cmd_index = epc + 2;
+    const int cmd_index = ep_count + 2;
     if (argc > cmd_index) {
         if (execvp(argv[cmd_index], &argv[cmd_index]) < 0) {
             perror("exec error");
@@ -199,7 +193,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    exit:
-        free(connections);
+exit:
+    free(endpoints);
     return exit_code;
 }
