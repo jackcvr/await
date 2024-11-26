@@ -58,7 +58,7 @@ void perrorf(const char *format, ...) {
 }
 
 int endpoint_parse_address(endpoint_t *ep, char *addr) {
-    int res = sscanf(addr, "%[^:]:%d/%d", (char *)&ep->host, &ep->port, &ep->timeout);
+    int res = sscanf(addr, "%[^:]:%u/%u", (char *)&ep->host, &ep->port, &ep->timeout);
     if (res == 2 || res == 3) {
         return 0;
     }
