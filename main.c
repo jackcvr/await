@@ -6,24 +6,29 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#define _POSIX_C_SOURCE 199309L
 #include <time.h>
 #include <stdbool.h>
 #include <string.h>
 #include <stdarg.h>
 
-#ifndef CONNECTION_TIME_USEC
-#define CONNECTION_TIME_USEC 25000 // 25ms
+#ifndef CONNECTION_TIME_MS
+#define CONNECTION_TIME_MS 25
 #endif
 
-#ifndef INTERVAL_USEC
-#define INTERVAL_USEC 1000000 // 1s
+#ifndef INTERVAL_MS
+#define INTERVAL_MS 1000 // 1s
 #endif
 
-#if INTERVAL_USEC < CONNECTION_TIME_USEC
-#error INTERVAL_USEC cannot be less than CONNECTION_TIME_USEC
+#if INTERVAL_MS < CONNECTION_TIME_MS
+#error INTERVAL_MS cannot be less than CONNECTION_TIME_MS
 #endif
 
-const unsigned int INTERVAL_USEC_ = INTERVAL_USEC - CONNECTION_TIME_USEC;
+const unsigned int INTERVAL_MS_ = INTERVAL_MS - CONNECTION_TIME_MS;
+const struct timespec INTERVAL = {
+    .tv_sec = INTERVAL_MS_ / 1000,
+    .tv_nsec = INTERVAL_MS_ % 1000 * 1000000,
+};
 
 typedef struct {
     char host[255];
@@ -99,7 +104,6 @@ void timespec_monotime(struct timespec *ts) {
 
 int main(int argc, char *argv[]) {
     int exit_code = EXIT_SUCCESS;
-    endpoint_t *endpoints = NULL;
 #define RETURN(code) exit_code = code; goto exit
 
     // count out endpoints
@@ -113,10 +117,10 @@ int main(int argc, char *argv[]) {
         fprintf(stderr,
             "Usage: %s <host>:<port>[/<timeout>] [<host>:<port>[/<timeout>] ...] [-- <command>]\n",
             argv[0]);
-        RETURN(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
-    endpoints = calloc(ep_count, sizeof(endpoint_t));
+    endpoint_t *endpoints = calloc(ep_count, sizeof(endpoint_t));
     struct timespec ts;
 
     // setup endpoints
@@ -148,7 +152,6 @@ int main(int argc, char *argv[]) {
     struct sockaddr _addr_;
     socklen_t _addr_len_;
     int done = 0;
-#define CHECK_BREAK if (done >= ep_count) break
 
     while (true) {
         // try to connect each not connected and not time-outed endpoint
@@ -180,8 +183,8 @@ int main(int argc, char *argv[]) {
                 ++done;
             }
         }
-        CHECK_BREAK;
-        usleep(CONNECTION_TIME_USEC); // give some time to establish connections
+        if (done >= ep_count) break;
+        nanosleep(&INTERVAL, NULL); // give some time to establish connections
 
         // check availability by executing getpeername on each socket which is in progress
         for (int i = 0; i < ep_count; ++i) {
@@ -198,8 +201,8 @@ int main(int argc, char *argv[]) {
             endpoint_close(ep);
             ++done;
         }
-        CHECK_BREAK;
-        usleep(INTERVAL_USEC_);
+        if (done >= ep_count) break;
+        nanosleep(&INTERVAL, NULL);
     }
 
     exit:
