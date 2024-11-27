@@ -1,7 +1,7 @@
 FROM debian:12-slim
 
 RUN apt-get update \
-    && apt-get install -y wget valgrind
+    && apt-get install -y wget valgrind make
 
 RUN wget https://musl.cc/x86_64-linux-musl-native.tgz \
     && tar xvfz x86_64-linux-musl-native.tgz

@@ -4,7 +4,7 @@ services:
     working_dir: /app
     volumes:
       - .:/app
-    command: [x86_64-linux-musl-gcc, -Wall, -Wextra, -Wpedantic, -std=c2x, -O2, -static, -s, -o, await, main.c]
+    command: [make]
 
   await:
     build: .

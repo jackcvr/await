@@ -24,10 +24,16 @@
 #error INTERVAL_MS cannot be less than CONNECTION_TIME_MS
 #endif
 
-const unsigned int INTERVAL_MS_ = INTERVAL_MS - CONNECTION_TIME_MS;
-const struct timespec INTERVAL = {
-    .tv_sec = INTERVAL_MS_ / 1000,
-    .tv_nsec = INTERVAL_MS_ % 1000 * 1000000,
+const struct timespec connection_time = {
+    .tv_sec = 0,
+    .tv_nsec = CONNECTION_TIME_MS * 1000000,
+};
+
+#define REAL_INTERVAL_MS (INTERVAL_MS - CONNECTION_TIME_MS)
+
+const struct timespec interval = {
+    .tv_sec = REAL_INTERVAL_MS / 1000,
+    .tv_nsec = REAL_INTERVAL_MS % 1000 * 1000000,
 };
 
 typedef struct {
@@ -184,7 +190,7 @@ int main(int argc, char *argv[]) {
             }
         }
         if (done >= ep_count) break;
-        nanosleep(&INTERVAL, NULL); // give some time to establish connections
+        nanosleep(&connection_time, NULL); // give some time to establish connections
 
         // check availability by executing getpeername on each socket which is in progress
         for (int i = 0; i < ep_count; ++i) {
@@ -202,7 +208,7 @@ int main(int argc, char *argv[]) {
             ++done;
         }
         if (done >= ep_count) break;
-        nanosleep(&INTERVAL, NULL);
+        nanosleep(&interval, NULL);
     }
 
     exit:
