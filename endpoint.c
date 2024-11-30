@@ -47,7 +47,7 @@ int endpoint_create_socket(endpoint_t *self) {
 }
 
 void endpoint_set_deadline(endpoint_t *self) {
-    struct timespec now = monotime();
+    const struct timespec now = monotime();
     self->deadline.tv_sec = now.tv_sec + self->timeout;
     self->deadline.tv_nsec = now.tv_nsec;
 }

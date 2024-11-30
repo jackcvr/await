@@ -98,7 +98,7 @@ int main(int argc, char *argv[]) {
                     ep->in_progress = false;
                 }
                 if (ep->deadline.tv_sec > 0) {
-                    struct timespec now = monotime();
+                    const struct timespec now = monotime();
                     if (now.tv_sec >= ep->deadline.tv_sec && now.tv_nsec >= ep->deadline.tv_nsec) {
                         ep->is_failed = true;
                         ++done;
