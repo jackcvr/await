@@ -5,7 +5,7 @@ CFLAGS := -Wall -Wextra -Wpedantic -std=c2x -O2 -static -s
 all: main
 
 main: main.c
-	$(CC) $(CFLAGS) -o $(BIN) main.c
+	$(CC) $(CFLAGS) -o $(BIN) main.c endpoint.c
 
 clean:
-	rm -f $(BIN) main.o
+	rm -f $(BIN) main.o endpoint.o
