@@ -2,19 +2,25 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <string.h>
+#include <sys/time.h>
 
 #include "endpoint.h"
 
-struct timespec monotime() {
-    struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) < 0) {
-        perror("clock_gettime() error");
+struct timeval gettime() {
+    struct timeval tv;
+    if (gettimeofday(&tv, NULL) < 0) {
+        perror("gettimeofday() error");
         exit(EXIT_FAILURE);
     }
-    return ts;
+    return tv;
 }
 
 int endpoint_parse_address(endpoint_t *self, char *addr) {
+    if (strlen(addr) > sizeof(self->host)) {
+        fprintf(stderr, "error: address should be less than %lu characters\n", sizeof(self->host) + 1);
+        exit(EXIT_FAILURE);
+    }
     int res = sscanf(addr, "%[^:]:%u/%u", (char *)&self->host, &self->port, &self->timeout);
     if (res == 2 || res == 3) {
         return 0;
@@ -47,17 +53,31 @@ int endpoint_create_socket(endpoint_t *self) {
 }
 
 void endpoint_set_deadline(endpoint_t *self) {
-    const struct timespec now = monotime();
-    self->deadline.tv_sec = now.tv_sec + self->timeout;
-    self->deadline.tv_nsec = now.tv_nsec;
+    if (self->timeout > 0) {
+        const struct timeval now = gettime();
+        self->deadline.tv_sec = now.tv_sec + self->timeout;
+        self->deadline.tv_usec = now.tv_usec;
+    }
 }
 
 int endpoint_connect(endpoint_t *self) {
     return connect(self->fd, (struct sockaddr *)&self->sa, sizeof(self->sa));
 }
 
+bool endpoint_is_expired(endpoint_t *self) {
+    if (self->deadline.tv_sec > 0) {
+        const struct timeval now = gettime();
+        return now.tv_sec >= self->deadline.tv_sec && now.tv_usec >= self->deadline.tv_usec;
+    }
+    return false;
+}
+
+bool endpoint_is_connected(endpoint_t *self) {
+    struct sockaddr addr;
+    socklen_t len;
+    return getpeername(self->fd, &addr, &len) >= 0;
+}
+
 void endpoint_close(endpoint_t *self) {
     close(self->fd);
-    self->is_connected = true;
-    printf("%s:%d is available\n", self->host, self->port);
 }
