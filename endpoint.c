@@ -16,16 +16,15 @@ struct timeval gettime() {
     return tv;
 }
 
-int endpoint_parse_address(endpoint_t *self, char *addr) {
+parse_error_t endpoint_parse_address(endpoint_t *self, char *addr) {
     if (strlen(addr) > sizeof(self->host)) {
-        fprintf(stderr, "error: address should be less than %lu characters\n", sizeof(self->host) + 1);
-        exit(EXIT_FAILURE);
+        return PARSE_ERROR_HOST_IS_TOO_LONG;
     }
     int res = sscanf(addr, "%[^:]:%u/%u", (char *)&self->host, &self->port, &self->timeout);
     if (res == 2 || res == 3) {
-        return 0;
+        return PARSE_SUCCESS;
     }
-    return -1;
+    return PARSE_ERROR_INVALID_ADDRESS;
 }
 
 int endpoint_getaddrinfo(endpoint_t *self) {

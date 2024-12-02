@@ -50,8 +50,16 @@ int main(int argc, char *argv[]) {
 
     for (int i = 0; i < ep_count; ++i) {
         endpoint_t *ep = &endpoints[i];
-        if (endpoint_parse_address(ep, argv[i + 1]) < 0) {
-            PERROR("[%s] bad address", argv[i + 1]);
+        const parse_error_t ret = endpoint_parse_address(ep, argv[i + 1]);
+        if (ret != 0) {
+            switch (ret) {
+            case PARSE_ERROR_HOST_IS_TOO_LONG:
+                fprintf(stderr,
+                    "[%s]: address should be less than %lu characters\n", argv[i + 1], sizeof(ep->host) + 1);
+                break;
+            default:
+                fprintf(stderr, "[%s] bad address", argv[i + 1]);
+            }
             RETURN(EXIT_FAILURE);
         }
         if (endpoint_getaddrinfo(ep) < 0) {
@@ -64,6 +72,8 @@ int main(int argc, char *argv[]) {
         }
         endpoint_set_deadline(ep);
     }
+
+#define PRINT_SUCCESS(ep) printf("%s:%d is available\n", ep->host, ep->port)
 
     int done = 0;
     for (;;) {
@@ -91,7 +101,7 @@ int main(int argc, char *argv[]) {
                 endpoint_close(ep);
                 ep->is_connected = true;
                 ++done;
-                printf("%s:%d is available\n", ep->host, ep->port);
+                PRINT_SUCCESS(ep);
             }
         }
 
@@ -105,7 +115,9 @@ int main(int argc, char *argv[]) {
             }
             if (endpoint_is_connected(ep)) {
                 endpoint_close(ep);
+                ep->is_connected = true;
                 ++done;
+                PRINT_SUCCESS(ep);
             }
         }
 
